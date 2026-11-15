@@ -5,4 +5,5 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     CREATE DATABASE wallet_engine;
     CREATE DATABASE double_entry_ledger;
     CREATE DATABASE payment_gateway;
+    CREATE DATABASE test;
 EOSQL

@@ -20,7 +20,7 @@
 -- ==========================================
 CREATE TABLE ledger_db_accounts (
     code INT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+    name VARCHAR(100) NOT NULL,\
     type VARCHAR(50) NOT NULL, -- ASSET, LIABILITY, REVENUE, EXPENSE
     currency VARCHAR(3) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -36,8 +36,8 @@ CREATE TABLE ledger_db_journal_entries (
 
 CREATE TABLE ledger_db_journal_lines (
     id UUID PRIMARY KEY,
-    journal_entry_id UUID NOT NULL REFERENCES journal_entries(id),
-    account_id INT NOT NUL REFERENCES accounts(id),
+    journal_entry_id UUID NOT NULL REFERENCES ledger_db_journal_entries(id),
+    account_id INT NOT NULL REFERENCES ledger_db_accounts(code),
     wallet_id BIGINT,       -- sub-ledger tag for 2210
     debit BIGINT NOT NULL DEFAULT 0, 
     credit BIGINT NOT NULL DEFAULT 0,
@@ -56,11 +56,11 @@ CREATE TABLE wallet_db_users (
 
 CREATE TABLE wallet_db_wallets (
     id UUID PRIMARY KEY,
-    user_id UUID UNIQUE NOT NULL REFERENCES users(id),
-    ledger_account_id UUID NOT NULL, -- Links to Ledger's liability account
+    user_id UUID UNIQUE NOT NULL REFERENCES wallet_db_users(id),
+    ledger_account_id INT NOT NULL, -- Links to Ledger's liability account
     -- balance NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
     available BIGINT NOT NULL DEFAULT 0 CHECK (available >= 0),
-    held      BIGINT NOT NULL DEFAULT 0 CHECK (held >= 0));
+    held      BIGINT NOT NULL DEFAULT 0 CHECK (held >= 0),
     currency VARCHAR(3) NOT NULL,
     version INT NOT NULL DEFAULT 0, -- Optimistic locking
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -69,7 +69,7 @@ CREATE TABLE wallet_db_wallets (
 CREATE TABLE wallet_db_wallet_transactions (
     id UUID PRIMARY KEY,
     idempotency_key VARCHAR(255) UNIQUE NOT NULL,
-    wallet_id UUID NOT NULL REFERENCES wallets(id),
+    wallet_id UUID NOT NULL REFERENCES wallet_db_wallets(id),
     type VARCHAR(50) NOT NULL, -- FUND, P2P, VAS, PAYOUT
     amount BIGINT NOT NULL, -- Amounts are integer pence
     fee BIGINT NOT NULL DEFAULT 0,
@@ -109,17 +109,19 @@ CREATE TABLE gateway_db_payments (
   tenant TEXT NOT NULL,
   amount BIGINT NOT NULL, 
   fee BIGINT NOT NULL,
-  status TEXT NOT NULL -- CAPTURED | SETTLED
+  status TEXT NOT NULL, -- CAPTURED | SETTLED
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );         
   
 CREATE TABLE gateway_db_payouts (
   id BIGSERIAL PRIMARY KEY, 
-  idem_key TEXT UNIQUE NOT NULL, 
+  idempotency_key TEXT UNIQUE NOT NULL, 
   tenant TEXT NOT NULL,
   amount BIGINT NOT NULL, 
-  status TEXT NOT NULL
+  status TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
+/*
 CREATE TABLE gateway_db_pg_transactions (
     id UUID PRIMARY KEY,
     idempotency_key VARCHAR(255) UNIQUE NOT NULL,
@@ -130,7 +132,7 @@ CREATE TABLE gateway_db_pg_transactions (
     gateway_reference VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
+*/
 
 -- ==========================================
 -- SEEDING
@@ -140,34 +142,40 @@ CREATE TABLE gateway_db_pg_transactions (
 -- ==========================================
 
 --[Wallet Engine DB]
+-- select gen_random_uuid();
+-- 00000000-0000-0000-1001-000000000000 wallet_db_users
+-- 00000000-0000-0000-1002-000000000000 wallet_db_wallets
+-- 00000000-0000-0000-1003-000000000000 wallet_db_wallet_transactions
+
 BEGIN;
-INSERT INTO wallet_db_users (id, email) VALUES ('user_uuid_A', 'customer.a@fintech.com');
+INSERT INTO wallet_db_users (id, email) VALUES ('00000000-0000-0000-1001-000000000001', 'customer.a@fintech.com');
 -- Call [Ledger System DB] through an API to create account and get a ledger account ID
-INSERT INTO wallet_db_wallets (id, user_id, ledger_account_id, available, currency) VALUES ('wal_uuid_A', 'user_uuid_A', 'wallet_db_acc_liability_cust_A', 0.0000, 'USD');
+INSERT INTO wallet_db_wallets (id, user_id, ledger_account_id, available, currency) VALUES
+('00000000-0000-0000-1002-000000000001', '00000000-0000-0000-1001-000000000001', '2211', 0.0000, 'USD');
 COMMIT;
 
 
 BEGIN;
-INSERT INTO wallet_db_users (id, email) VALUES ('user_uuid_B', 'customer.b@fintech.com');
+INSERT INTO wallet_db_users (id, email) VALUES ('00000000-0000-0000-1001-000000000002', 'customer.b@fintech.com');
 -- Call [Ledger System DB] through an API to create account and get a ledger account ID
-INSERT INTO wallet_db_wallets (id, user_id, ledger_account_id, available, currency) VALUES ('wal_uuid_B', 'user_uuid_B', 'wallet_db_acc_liability_cust_B', 0.0000, 'USD');
+INSERT INTO wallet_db_wallets (id, user_id, ledger_account_id, available, currency) VALUES ('00000000-0000-0000-1002-000000000002', '00000000-0000-0000-1001-000000000002', '2212', 0.0000, 'USD');
 COMMIT;
 
 -- [Ledger System DB] Create Customer A and B liability account in the ledger chart of accounts
-INSERT INTO ledger_db_accounts (id, name, type, currency) 
-VALUES ('wallet_db_acc_liability_cust_A', 'Customer A Liability Balance', 'LIABILITY', 'USD');
-INSERT INTO ledger_db_accounts (id, name, type, currency) 
-VALUES ('wallet_db_acc_liability_cust_B', 'Customer B Liability Balance', 'LIABILITY', 'USD');
+INSERT INTO ledger_db_accounts (code, name, type, currency) 
+VALUES ('2211', 'Customer A Liability Balance', 'LIABILITY', 'USD');
+INSERT INTO ledger_db_accounts (code, name, type, currency) 
+VALUES ('2212', 'Customer B Liability Balance', 'LIABILITY', 'USD');
 
 -- [Ledger System DB] Create Chart of Accounts (COA) for Wallet Engine
 INSERT INTO ledger_db_accounts VALUES
- (1210,'wallet_db_Gateway Funding Receivables','Asset'), -- Floating claims against the external gateway for incoming customer wallet deposits
- (1220,'wallet_db_Gateway Payout Clearing','Asset'), -- Transient tracking lane for outbound customer bank withdrawals routed through the gateway.
- (1230,'wallet_db_Settlement Bank Account','Asset'), -- Corporate bank account where the gateway deposits bulk payouts.   
- (2210,'wallet_db_User Wallet Balances (Liability Pool)','Liability'), -- The digital ledger balance leased to the user, reflecting their available spending power.
- (2220,'wallet_db_Saga Transaction Holds','Liability'),  -- Temporary escrow pool holding user funds during active multi-network workflows (e.g., utility purchases).
- (4210,'wallet_db_Commission Revenue','Revenue'), -- Margins earned by adding a convenience fee on top of the gateway's base pricing.
- (5210,'wallet_db_Gateway Processing Expense','Expense'); -- Interchange and processing costs deducted by the external provider
+ (1210,'wallet_db_Gateway Funding Receivables','ASSET', 'USD'), -- Floating claims against the external gateway for incoming customer wallet deposits
+ (1220,'wallet_db_Gateway Payout Clearing','ASSET', 'USD'), -- Transient tracking lane for outbound customer bank withdrawals routed through the gateway.
+ (1230,'wallet_db_Settlement Bank Account','ASSET', 'USD'), -- Corporate bank account where the gateway deposits bulk payouts.   
+ (2210,'wallet_db_User Wallet Balances (Liability Pool)','LIABILITY', 'USD'), -- The digital ledger balance leased to the user, reflecting their available spending power.
+ (2220,'wallet_db_Saga Transaction Holds','LIABILITY','USD'),  -- Temporary escrow pool holding user funds during active multi-network workflows (e.g., utility purchases).
+ (4210,'wallet_db_Commission Revenue','REVENUE', 'USD'), -- Margins earned by adding a convenience fee on top of the gateway's base pricing.
+ (5210,'wallet_db_Gateway Processing Expense','EXPENSE', 'USD'); -- Interchange and processing costs deducted by the external provider
 
 
 --==============
@@ -182,33 +190,32 @@ INSERT INTO ledger_db_accounts VALUES
 INSERT INTO gateway_db_tenant_balances VALUES ('ewallet', 0);
 
 -- [Ledger System DB] Chart of Accounts (COA) for payment gateway
-INSERT INTO accounts VALUES
- (1110,'gateway_db_Processor Receivables (In-Transit)','Asset'),   -- Funds captured by card networks but not yet deposited into the gateway's bank.    
- (1120,'gateway_db_Gateway Settlement Bank Account','Asset'), -- Corporate bank account used to receive network settlements and dispatch payouts.
- (2110,'gateway_db_Merchant Settlement Payables','Liability'), -- Net funds owed to your merchant tenants that are available for withdrawal. 
- (4110,'gateway_db_Gateway_Processing Fee Revenue','Revenue'), -- Gross margins earned by the platform from your variable/fixed transaction fee splits. 
- (5110,'gateway_db_Interchange/Processor Expense','Expense');  -- Upstream interchange fees charged by core Visa/Mastercard card networks or card factories.
-
-
-
-
-
+INSERT INTO ledger_db_accounts VALUES
+ (1110,'gateway_db_Processor Receivables (In-Transit)','ASSET', 'USD'),   -- Funds captured by card networks but not yet deposited into the gateway's bank.    
+ (1120,'gateway_db_Gateway Settlement Bank Account','ASSET', 'USD'), -- Corporate bank account used to receive network settlements and dispatch payouts.
+ (2110,'gateway_db_Merchant Settlement Payables','LIABILITY', 'USD'), -- Net funds owed to your merchant tenants that are available for withdrawal. 
+ (4110,'gateway_db_Gateway_Processing Fee Revenue','REVENUE', 'USD'), -- Gross margins earned by the platform from your variable/fixed transaction fee splits. 
+ (5110,'gateway_db_Interchange/Processor Expense','EXPENSE', 'USD');  -- Upstream interchange fees charged by core Visa/Mastercard card networks or card factories.
 
 
 -- ==========================================
 -- Workflow A: Customer A Funds His Wallet
 -- ($100 deposit, $3 fee, $1.50 gateway cut)
--- Objective: Customer A deposits $100 via Payment Gateway. Money moves from Gateway Clearing to Customer A's ledger account, and wallet balance updates.
 -- ==========================================
 
 -- Initiate: Client calls Wallet Engine to fund wallet.
 -- **A1.  [Wallet Engine DB] Create the pending deposit and queue the charge request** (one local transaction, so the intent and the message can never diverge - Transactional Outbox pattern):
 
 BEGIN;
-INSERT INTO wallet_transactions (id, idempotency_key, wallet_id, type, amount, fee, status) VALUES ('wtx_001', 'dep-001', 1, 'FUND', 10000, 300, 'PENDING')ON CONFLICT (idem_key) DO NOTHING;           -- client retry = no-op
-INSERT INTO outbox (topic, payload) VALUES ('gateway.charge', '{"ref":"dep-001","amount":10300}');
+INSERT INTO wallet_db_wallet_transactions (
+    id, idempotency_key, wallet_id, type, amount, fee, status) 
+    VALUES (
+        '00000000-0000-0000-1003-000000000001', 'dep-001', '00000000-0000-0000-1002-000000000001', 'FUND', 10000, 300, 'PENDING')
+    ON CONFLICT (idempotency_key) DO NOTHING;           -- client retry = no-op
+INSERT INTO wallet_db_outbox (topic, payload) 
+    VALUES ('gateway.charge', '{"ref":"dep-001","amount":10300}');
 COMMIT;
-```
+
 
 -- Payment Gateway: Wallet Engine calls Payment Gateway to charge the card/bank. Payment Gateway returns a PENDING status or a redirect URL.
 
@@ -535,3 +542,72 @@ Isolation Levels: Ensure database transactions use ISOLATION_REPEATABLE_READ or 
 • The Problem: The servers running your Wallet, Gateway, and Ledger will inevitably have slightly different system clocks (even off by a few hundred milliseconds). Relying on local server timestamps to decide which transaction happened first will corrupt your audit trail.
 • The Solution: Never use local server clocks for transaction ordering. Rely on a single authoritative source for sequence numbers (like the Ledger's database auto-incrementing ID) or use monotonically increasing event versions.
 
+
+1. The Dual-Write Problem (The Root Problem)
+
+• What it is: When a single operation needs to update two separate systems (e.g., writing to PostgreSQL and making an HTTP call to a Wallet or Ledger service).
+• Why it's dangerous: You cannot wrap a PostgreSQL database and an external HTTP API in a single shared BEGIN ... COMMIT transaction. If the database succeeds and the HTTP call fails (or your server loses power between them), your systems permanently disagree on reality.
+• Where it appears in your code: PaymentCaptureService avoids dual writes by never calling HTTP services directly—it only writes to PostgreSQL (payments and outbox).
+
+2. Transactional Outbox Pattern
+
+• What it is: Instead of sending external messages/webhooks directly during a request, you save them as rows in an outbox table inside the exact same local database transaction as your business data. A background worker (OutboxPoller) reads those rows asynchronously and delivers them.
+• Why it matters: It guarantees atomicity—either both the payment record and the outgoing tasks are saved, or neither is.
+• Where it appears in your code: PaymentCaptureService saves Payment + two OutboxMessage rows inside one @Transactional method.
+
+3. Delivery Guarantees: At-Most-Once vs. At-Least-Once vs. Exactly-Once
+
+In distributed systems over a network, messages can always be delayed or dropped. Systems define three delivery guarantees:
+
+Guarantee	What It Means	Risk
+At-Most-Once	Fire and forget. If the network fails, never retry.	Data loss (money captured, ledger never updated).
+At-Least-Once	Keep retrying until the receiver acknowledges (200 OK).	Duplicates (if the receiver processed it, but the 200 OK got lost on the way back).
+Exactly-Once	Every message is processed once and only once—even with retries.	Impossible over a raw network alone; achieved by combining At-Least-Once + Idempotency.
+
+• Where it appears in your code: OutboxPoller provides At-Least-Once delivery. Because it keeps retrying failed rows until they succeed—and might retry a row if your server crashes right after sending the HTTP request but before saving status = SENT—downstream services will occasionally receive duplicates.
+
+4. Idempotency & Idempotency Keys
+
+• What it is: An operation is idempotent if performing it multiple times produces the exact same result as performing it once (e.g., pressing an elevator call button 10 times still only calls one elevator).
+• Why it matters: Since networks force us to use At-Least-Once delivery, receivers must safely ignore duplicate retries.
+• Where it appears in your code: You attach a unique idempotencyKey (msg1, entryId) to every outgoing webhook header (Idempotency-Key) and ledger payload so the Wallet and Ledger services can detect and ignore retries.
+
+5. Inbox Pattern (Deduplication)
+
+• What it is: The receiving side of idempotency. Before processing an incoming message, the receiver tries to insert its unique message_id into an inbox table inside the same transaction as the business work.
+• Why it matters: If a payment gateway retries a webhook because of a timeout, the inbox primary key blocks duplicate processing while ensuring that if the first attempt crashed and rolled back, the inbox row rolled back too—allowing a valid retry to succeed.
+• Where it appears in your code: inboxRepository.insertIgnoreConflict(tenantId, dep1) in PaymentCaptureService.
+
+6. Competing Consumers & Pessimistic Locking (SKIP LOCKED)
+
+• What it is: Running multiple instances of a worker (OutboxPoller) that pull tasks from a shared queue concurrently without stepping on each other's toes.
+• Why it matters: Without row-level locking, two instances of your app polling at the same millisecond would grab the same 50 PENDING rows and send duplicate webhooks.
+• Where it appears in your code: FOR UPDATE SKIP LOCKED in OutboxRepository.claimBatchForProcessing(...) lets each app instance lock its own exclusive batch of rows without blocking other instances.
+
+7. Exponential Backoff & Dead-Letter Queue (DLQ)
+
+• Exponential Backoff: When a downstream service is down, retrying immediately every 500ms floods it with traffic (a "retry storm"). Instead, you wait longer after each failure (2s, 4s, 8s, 16s) via nextAttemptAt.
+• Dead-Letter Queue (DLQ): A quarantine state (status = DEAD_LETTER) for "poison pill" messages that fail repeatedly (e.g., due to a malformed payload or invalid account ID). Moving them to DEAD_LETTER stops them from blocking healthy messages in the queue while preserving them for engineers to inspect and replay later.
+• Where it appears in your code: OutboxMessage.markFailed(MAX_ATTEMPTS).
+
+8. Eventual Consistency
+
+• What it is: Unlike strong consistency (where all systems update at the exact same instant), eventual consistency means that after a transaction commits locally, dependent systems (Wallet and Ledger) will catch up and reach the same consistent state shortly afterward (usually within milliseconds).
+• Where it appears in your code: There is a brief ~500ms window between PaymentCaptureService committing CAPTURED in your database and OutboxPoller finishing the HTTP calls to the Wallet and Ledger.
+
+How They Chain Together End-to-End
+
+text
+Incoming Webhook ──► [ Inbox Pattern ] (blocks duplicate incoming requests)
+                            │
+                            ▼
+                     [ Local ACID DB ] (saves Payment + Outbox atomically; solves Dual-Write)
+                            │
+                            ▼
+                     [ SKIP LOCKED ]   (lets multiple pollers safely share work)
+                            │
+                            ▼
+                     [ At-Least-Once ] (retries with Exponential Backoff / Dead-Letter)
+                            │
+                            ▼
+                     [ Idempotency ]   (Idempotency-Key lets Wallet & Ledge
