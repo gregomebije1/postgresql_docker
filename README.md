@@ -1,7 +1,7 @@
 
 # Useful Commands
 
-./mvnw clean compile
+    ./mvnw clean compile
 
 
 
