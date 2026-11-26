@@ -1,8 +1,37 @@
+# What was built
+- The E-Wallet Orchestrator Engine: A customer-facing, assetless pass-through engine that leases balances, holds no physical cash custody, and delegates funding/payout actions to an external gateway.
+
+- The Payment Gateway Clearing Engine: An infrastructure pipeline that manages incoming processor receivables, calculates basis-point transaction fee splits, and drives merchant settlements.
+
+
+Charts of Accounts and Entry Templates
+
+Book
+wallet (Wallet Service)	
+W010 Settlement Bank (A),
+W100 Customer Available (L),  sub_ref: the customer's wallet id on W100
+W110 Customer Held (L),  sub_ref: the customer's wallet id on W110
+W200 Fee Revenue (R), 
+W210 Gateway Fees Expense (E),
+W300 Funding Receivable (A), 
+W400 Vendor Payout Clearing (A)	
+1230, 2210, 2220, 4210, 5210, 1210, 1220
+
+gateway (Gateway Service)	
+G100 Processor Receivable (A), 
+G110 Gateway Bank (A), 
+G200 Merchant Settlement Payable (L),  sub_ref: the merchant id on G200
+G300 Processing Fee Revenue (R), 
+G400 Interchange Expense (E)	
+1110, 1120, 2110, 4110, 5110
+
+
+
 Id	Flow step (link)	    Queued by	Book	Debit	Credit
-e1	A3 Deposit captured	    Wallet	wallet	W300 $103.00	W100[w1] $100.00; W200 $3.00
-e2	A6 Settlement received	Wallet	wallet	W010 $101.50; W210 $1.50	W300 $103.00
-e3	A2 Charge captured	    Gateway	gateway	G100 $103.00	G200 $101.50; G300 $1.50
-e4	A5 Settle and pay out	Gateway	gateway	G110 $103.00; G200 $101.50	G100 $103.00; G110 $101.50
+e1	A3 Deposit captured	    Wallet	wallet	    W300 $103.00	W100[w1] $100.00; W200 $3.00
+e2	A6 Settlement received	Wallet	wallet	    W010 $101.50; W210 $1.50	W300 $103.00
+e4	A5 Settle and pay out	Gateway	gateway	    G110 $103.00; G200 $101.50	G100 $103.00; G110 $101.50
+e3	A2 Charge captured	    Gateway	gateway	    G100 $103.00	G200 $101.50; G300 $1.50
 e5	B P2P transfer	Wallet	wallet	W100[w1] $25.00	W100[w2] $25.00
 e6	C1 Hold placed	Wallet	wallet	W100[w1] $10.00	W110[w1] $10.00
 e13	G1 Vendor payout sent	Gateway	gateway	G200 $10.00	G110 $10.00
@@ -14,6 +43,18 @@ e10	M2 Network settlement	Gateway	gateway	G110 $98.90; G400 $1.10	G100 $100.00
 e11	M3 Merchant withdrawal	Gateway	gateway	G200[m1] $97.20	G110 $97.20
 e12	M3b Withdrawal reversed Gateway	gateway	G110 $97.20	G200[m1] $97.20
 
+
+\set w1   '''a1000000-0000-0000-0000-000000000001'''
+\set w2   '''a1000000-0000-0000-0000-000000000002'''
+\set dep1 '''d0000000-0000-0000-0000-000000000001'''
+\set p2p1 '''d0000000-0000-0000-0000-000000000002'''
+\set vas1 '''d0000000-0000-0000-0000-000000000003'''
+\set msg1 '''e0000000-0000-0000-0000-000000000001'''
+\set msg2 '''e0000000-0000-0000-0000-000000000002'''
+\set msg3 '''e0000000-0000-0000-0000-000000000003'''
+\set msg4 '''e0000000-0000-0000-0000-000000000004'''
+\set e1   '''f0000000-0000-0000-0000-000000000001'''
+-- ... \set e2 to \set e14 follow the same pattern (last digits 02 to 14); each entry id must be unique
 
 
 # Ledger Service
@@ -368,12 +409,12 @@ curl -i -X POST "http://localhost:8080/api/wallet/v1/login" \
 curl -i -X POST "http://localhost:8080/api/wallet/v1/deposit" \
 -H "Content-Type: application/json" \
 -H "Authorization: Bearer user-token" \
--H "X-Idempotency-Key: d0000000-…-0001" \
+-H "X-Idempotency-Key: f0000000-0000-0000-0000-000000000001" \
 -d '{ 
-        "wallet_id": "a1000000-…-0001", 
+        "walletId": "4cc2317a-32dd-41a0-a61a-ba41f9f38a84", 
         "amount": 10000, 
         "currency": "USD", 
-        "card_token": "tok_4242" 
+        "cardToken": "tok_4242" 
 }'
 
  
